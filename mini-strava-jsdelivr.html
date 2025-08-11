@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Mini Strava — Walk Tracker (jsDelivr)</title>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet (map) via jsDelivr -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script
+    src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"
+  ></script>
+
+  <style>
+    html, body { height: 100%; background: #0b1119; }
+    #map { height: 45vh; }
+    * { -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="text-slate-100">
+  <div class="max-w-5xl mx-auto p-4 space-y-4">
+    <header class="flex items-center justify-between">
+      <h1 class="text-2xl font-bold tracking-tight">Mini Strava</h1>
+      <div class="text-xs opacity-70">Local-only • GPX export/import</div>
+    </header>
+
+    <section class="bg-slate-900/60 backdrop-blur rounded-2xl shadow-lg border border-slate-800">
+      <div class="grid md:grid-cols-2 gap-0">
+        <div class="p-3 md:p-4">
+          <div id="map" class="rounded-xl overflow-hidden border border-slate-800"></div>
+          <div class="flex flex-wrap items-center gap-2 mt-3">
+            <button id="startBtn" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:hover:bg-emerald-600">Start</button>
+            <button id="pauseBtn" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 hidden">Pause</button>
+            <button id="resumeBtn" class="px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 hidden">Resume</button>
+            <button id="stopBtn" class="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 hidden">Stop & Save</button>
+
+            <div class="ml-auto flex items-center gap-2 text-sm">
+              <label class="flex items-center gap-2">
+                <input id="unitToggle" type="checkbox" class="accent-indigo-500">
+                <span id="unitLabel">km</span>
+              </label>
+              <button id="centerBtn" class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700">Center</button>
+            </div>
+          </div>
+          <p id="status" class="text-xs text-slate-400 mt-2"></p>
+        </div>
+
+        <div class="p-4 space-y-4">
+          <div class="grid grid-cols-3 gap-3">
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+              <div class="text-xs uppercase tracking-wide text-slate-400">Time</div>
+              <div id="time" class="text-2xl font-semibold mt-1">00:00:00</div>
+            </div>
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+              <div class="text-xs uppercase tracking-wide text-slate-400">Distance</div>
+              <div id="distance" class="text-2xl font-semibold mt-1">0.00 km</div>
+            </div>
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700">
+              <div class="text-xs uppercase tracking-wide text-slate-400">Avg Pace</div>
+              <div id="pace" class="text-2xl font-semibold mt-1">—</div>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <label class="block text-sm text-slate-300">Activity Title</label>
+            <input id="activityTitle" type="text" placeholder="Morning Walk"
+                   class="w-full px-3 py-2 rounded-xl bg-slate-800 border border-slate-700 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div class="text-xs text-slate-400">GPS Quality: <span id="gpsQuality">—</span></div>
+            <div class="text-xs text-slate-400">Points: <span id="pointCount">0</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-slate-900/60 backdrop-blur rounded-2xl shadow-lg border border-slate-800 p-4">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <h2 class="text-xl font-semibold">Saved Activities</h2>
+        <div class="flex items-center gap-2">
+          <label class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 cursor-pointer">
+            <input id="gpxImport" type="file" accept=".gpx" class="hidden">
+            Import GPX
+          </label>
+          <button id="exportAllBtn" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700">Export All (JSON)</button>
+          <button id="clearAllBtn" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700">Delete All</button>
+        </div>
+      </div>
+      <div id="activities" class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"></div>
+      <p class="text-xs text-slate-400 mt-3">Tip: Export GPX for a friend, or send the JSON file — they can Import GPX/JSON with any converter or view GPX in most apps.</p>
+    </section>
+
+    <footer class="text-center text-xs text-slate-500 py-6">
+      Built for small friend groups. Uses OpenStreetMap + Leaflet. Your data stays in your browser.
+    </footer>
+  </div>
+
+  <script>
+    // Guard: if Leaflet failed to load (CDN blocked), show a clear message
+    window.addEventListener('load', () => {
+      if (!window.L) {
+        const el = document.getElementById('status');
+        if (el) el.textContent = "Leaflet (map library) didn't load. Some networks block CDNs. Try another network or the unpkg/jsDelivr swap.";
+        alert("Leaflet failed to load. Try a different network or CDN.");
+      }
+    });
+  </script>
+
+  <script>
+    // ---------- Utilities ----------
+    const $ = (id) => document.getElementById(id);
+    const fmt2 = (n) => n < 10 ? "0" + n : "" + n;
+
+    function fmtHMS(totalSec) {
+      totalSec = Math.max(0, Math.floor(totalSec));
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      return (h > 0 ? fmt2(h)+":" : "") + fmt2(m) + ":" + fmt2(s);
+    }
+
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000; // meters
+      const toRad = (x) => x * Math.PI / 180;
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat/2)**2 +
+                Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*
+                Math.sin(dLon/2)**2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c; // meters
+    }
+
+    function computeDistance(points) {
+      let m = 0;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i-1], b = points[i];
+        m += haversine(a.lat, a.lng, b.lat, b.lng);
+      }
+      return m;
+    }
+
+    function paceString(seconds, meters, unitKm) {
+      if (meters < 10 || seconds < 10) return "—";
+      const distance = unitKm ? (meters/1000) : (meters/1609.344);
+      if (distance <= 0) return "—";
+      const spd = seconds / distance; // sec per km or mile
+      const min = Math.floor(spd / 60);
+      const sec = Math.floor(spd % 60);
+      return `${min}:${fmt2(sec)} / ${unitKm ? "km" : "mi"}`;
+    }
+
+    function uuid() {
+      return URL.createObjectURL(new Blob()).split('/').pop();
+    }
+
+    const storeKey = "miniStrava.activities.v1";
+
+    function getActivities() {
+      try {
+        return JSON.parse(localStorage.getItem(storeKey) || "[]");
+      } catch {
+        return [];
+      }
+    }
+    function setActivities(arr) {
+      localStorage.setItem(storeKey, JSON.stringify(arr));
+    }
+
+    // ---------- Map ----------
+    let map, trackLine, startMarker, endMarker, liveMarker;
+    let points = [];
+    let unitKm = true;
+
+    function initMap() {
+      map = L.map('map', { zoomControl: false, attributionControl: true });
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+      const tiles = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+      }).addTo(map);
+
+      // Default view (will recenter on first GPS fix)
+      map.setView([40, -100], 4);
+
+      trackLine = L.polyline([], { color: '#60a5fa', weight: 5 }).addTo(map);
+    }
+
+    function updatePolyline() {
+      trackLine.setLatLngs(points.map(p => [p.lat, p.lng]));
+      if (!startMarker && points.length > 0) {
+        startMarker = L.marker([points[0].lat, points[0].lng], { title: "Start" }).addTo(map);
+      }
+      if (endMarker) {
+        endMarker.setLatLng([points[points.length - 1].lat, points[points.length - 1].lng]);
+      } else if (points.length > 0) {
+        endMarker = L.marker([points[points.length - 1].lat, points[points.length - 1].lng], { title: "End" }).addTo(map);
+      }
+      if (liveMarker) {
+        liveMarker.setLatLng([points[points.length - 1].lat, points[points.length - 1].lng]);
+      } else if (points.length > 0) {
+        liveMarker = L.circleMarker([points[points.length - 1].lat, points[points.length - 1].lng], {
+          radius: 7, weight: 2, color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 0.9
+        }).addTo(map);
+      }
+    }
+
+    function fitToTrack() {
+      if (points.length === 0) return;
+      const latlngs = points.map(p => [p.lat, p.lng]);
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [20, 20] });
+    }
+
+    // ---------- Tracking State ----------
+    let watchingId = null;
+    let running = false;
+    let paused = false;
+    let startEpoch = 0;
+    let elapsedSec = 0;
+    let timerInt = null;
+
+    function resetSessionUI() {
+      points = [];
+      elapsedSec = 0;
+      running = false;
+      paused = false;
+      startEpoch = 0;
+      if (watchingId !== null) { navigator.geolocation.clearWatch(watchingId); watchingId = null; }
+      if (timerInt) { clearInterval(timerInt); timerInt = null; }
+
+      // Clear map layers
+      trackLine.setLatLngs([]);
+      if (startMarker) { map.removeLayer(startMarker); startMarker = null; }
+      if (endMarker) { map.removeLayer(endMarker); endMarker = null; }
+      if (liveMarker) { map.removeLayer(liveMarker); liveMarker = null; }
+
+      // UI states
+      $('time').textContent = "00:00:00";
+      $('distance').textContent = unitKm ? "0.00 km" : "0.00 mi";
+      $('pace').textContent = "—";
+      $('gpsQuality').textContent = "—";
+      $('pointCount').textContent = "0";
+      $('status').textContent = "";
+
+      $('startBtn').classList.remove('hidden');
+      $('pauseBtn').classList.add('hidden');
+      $('resumeBtn').classList.add('hidden');
+      $('stopBtn').classList.add('hidden');
+    }
+
+    function updateStats() {
+      $('time').textContent = fmtHMS(elapsedSec);
+      const meters = computeDistance(points);
+      const dist = unitKm ? (meters/1000) : (meters/1609.344);
+      $('distance').textContent = `${dist.toFixed(2)} ${unitKm ? "km" : "mi"}`;
+      $('pace').textContent = paceString(elapsedSec, meters, unitKm);
+      $('pointCount').textContent = String(points.length);
+    }
+
+    function startTimer() {
+      if (timerInt) clearInterval(timerInt);
+      const tick = () => {
+        if (running && !paused) {
+          elapsedSec++;
+          updateStats();
+        }
+      };
+      timerInt = setInterval(tick, 1000);
+    }
+
+    function canAcceptPoint(prev, next) {
+      if (!prev) return true;
+      const d = haversine(prev.lat, prev.lng, next.lat, next.lng);
+      const dt = ((new Date(next.t)).getTime() - (new Date(prev.t)).getTime()) / 1000;
+      if (dt <= 0) return false;
+      const speed = d / dt; // m/s
+      if (speed > 6 || d > 150) return false;
+      return true;
+    }
+
+    async function startTracking() {
+      if (!('geolocation' in navigator)) {
+        $('status').textContent = "Geolocation not supported in this browser.";
+        return;
+      }
+      resetSessionUI();
+      running = true;
+      paused = false;
+      startEpoch = Date.now();
+      startTimer();
+
+      // Watch GPS
+      watchingId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, accuracy, speed } = pos.coords;
+          $('gpsQuality').textContent = accuracy ? `${Math.round(accuracy)} m` : "—";
+
+          if (paused) return;
+
+          const pt = { lat: latitude, lng: longitude, t: new Date().toISOString() };
+          const last = points[points.length - 1];
+          if (canAcceptPoint(last, pt)) {
+            points.push(pt);
+            updatePolyline();
+            updateStats();
+            if (points.length === 1) {
+              map.setView([pt.lat, pt.lng], 16);
+            }
+          }
+        },
+        (err) => {
+          $('status').textContent = "GPS error: " + err.message;
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 }
+      );
+
+      // UI
+      $('startBtn').classList.add('hidden');
+      $('pauseBtn').classList.remove('hidden');
+      $('stopBtn').classList.remove('hidden');
+      $('status').textContent = "Tracking… keep your screen on for best GPS stability.";
+    }
+
+    function pauseTracking() {
+      paused = true;
+      $('pauseBtn').classList.add('hidden');
+      $('resumeBtn').classList.remove('hidden');
+      $('status').textContent = "Paused.";
+    }
+
+    function resumeTracking() {
+      paused = false;
+      $('resumeBtn').classList.add('hidden');
+      $('pauseBtn').classList.remove('hidden');
+      $('status').textContent = "Tracking…";
+    }
+
+    function stopAndSave() {
+      running = false;
+      paused = false;
+      if (watchingId !== null) { navigator.geolocation.clearWatch(watchingId); watchingId = null; }
+      if (timerInt) { clearInterval(timerInt); timerInt = null; }
+
+      const meters = computeDistance(points);
+      if (points.length < 2 || meters < 5) {
+        $('status').textContent = "Not enough data to save. (Move a little more and try again!)";
+        resetSessionUI();
+        return;
+      }
+
+      const title = $('activityTitle').value.trim() || "Walk";
+      const activity = {
+        id: uuid(),
+        title,
+        createdAt: new Date().toISOString(),
+        unitKm: true,
+        points,
+        meters,
+        seconds: elapsedSec
+      };
+
+      const list = getActivities();
+      list.unshift(activity);
+      setActivities(list);
+      renderActivities();
+
+      $('status').textContent = "Saved!";
+      $('pauseBtn').classList.add('hidden');
+      $('resumeBtn').classList.add('hidden');
+      $('stopBtn').classList.add('hidden');
+      $('startBtn').classList.remove('hidden');
+    }
+
+    // ---------- Activities UI ----------
+    function renderActivities() {
+      const wrap = $('activities');
+      wrap.innerHTML = "";
+      const items = getActivities();
+
+      if (items.length === 0) {
+        wrap.innerHTML = `<div class="text-slate-400 text-sm">No activities yet. Start a walk or import a GPX.</div>`;
+        return;
+      }
+
+      items.forEach(act => {
+        const distKm = act.meters / 1000;
+        const dur = fmtHMS(act.seconds || 0);
+        const pace = paceString(act.seconds || 0, act.meters || 0, true);
+        const date = new Date(act.createdAt).toLocaleString();
+
+        const card = document.createElement('div');
+        card.className = "rounded-xl bg-slate-800 border border-slate-700 p-3 space-y-2";
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div>
+              <div class="font-semibold">${escapeHtml(act.title || 'Walk')}</div>
+              <div class="text-xs text-slate-400">${date}</div>
+            </div>
+            <div class="text-right text-sm">
+              <div><span class="font-semibold">${distKm.toFixed(2)}</span> km</div>
+              <div class="text-slate-400">${pace}</div>
+              <div class="text-slate-400">${dur}</div>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button data-view="${act.id}" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">View</button>
+            <button data-gpx="${act.id}" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">Export GPX</button>
+            <button data-share="${act.id}" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600">Share GPX</button>
+            <button data-del="${act.id}" class="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600">Delete</button>
+          </div>
+        `;
+        wrap.appendChild(card);
+      });
+
+      wrap.querySelectorAll('button[data-view]').forEach(btn => {
+        btn.addEventListener('click', () => viewActivity(btn.getAttribute('data-view')));
+      });
+      wrap.querySelectorAll('button[data-del]').forEach(btn => {
+        btn.addEventListener('click', () => deleteActivity(btn.getAttribute('data-del')));
+      });
+      wrap.querySelectorAll('button[data-gpx]').forEach(btn => {
+        btn.addEventListener('click', () => exportGPX(btn.getAttribute('data-gpx')));
+      });
+      wrap.querySelectorAll('button[data-share]').forEach(btn => {
+        btn.addEventListener('click', () => shareGPX(btn.getAttribute('data-share')));
+      });
+    }
+
+    function escapeHtml(s) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+      return String(s).replace(/[&<>"']/g, m => map[m]);
+    }
+
+    function viewActivity(id) {
+      const act = getActivities().find(a => a.id === id);
+      if (!act) return;
+
+      points = act.points || [];
+      trackLine.setLatLngs(points.map(p => [p.lat, p.lng]));
+      if (startMarker) map.removeLayer(startMarker);
+      if (endMarker) map.removeLayer(endMarker);
+      if (liveMarker) map.removeLayer(liveMarker);
+
+      if (points.length) {
+        startMarker = L.marker([points[0].lat, points[0].lng], { title: "Start" }).addTo(map);
+        endMarker = L.marker([points[points.length - 1].lat, points[points.length - 1].lng], { title: "End" }).addTo(map);
+        liveMarker = L.circleMarker([points[points.length - 1].lat, points[points.length - 1].lng], {
+          radius: 7, weight: 2, color: '#22d3ee', fillColor: '#22d3ee', fillOpacity: 0.9
+        }).addTo(map);
+        fitToTrack();
+      }
+
+      const meters = act.meters || computeDistance(points);
+      const durSec = act.seconds || 0;
+      $('time').textContent = fmtHMS(durSec);
+      const dist = unitKm ? (meters/1000) : (meters/1609.344);
+      $('distance').textContent = `${dist.toFixed(2)} ${unitKm ? "km" : "mi"}`;
+      $('pace').textContent = paceString(durSec, meters, unitKm);
+      $('activityTitle').value = act.title || "Walk";
+
+      $('status').textContent = "Viewing saved activity.";
+      $('startBtn').classList.remove('hidden');
+      $('pauseBtn').classList.add('hidden');
+      $('resumeBtn').classList.add('hidden');
+      $('stopBtn').classList.add('hidden');
+    }
+
+    function deleteActivity(id) {
+      const items = getActivities().filter(a => a.id !== id);
+      setActivities(items);
+      renderActivities();
+    }
+
+    // ---------- GPX ----------
+    function buildGPX(activity) {
+      const name = escapeXml(activity.title || "Walk");
+      const trkpts = (activity.points || []).map(p =>
+        `<trkpt lat="${p.lat}" lon="${p.lng}"><time>${p.t || new Date().toISOString()}</time></trkpt>`
+      ).join("");
+      return `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="MiniStrava" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><time>${new Date(activity.createdAt || Date.now()).toISOString()}</time></metadata>
+  <trk>
+    <name>${name}</name>
+    <type>walking</type>
+    <trkseg>${trkpts}</trkseg>
+  </trk>
+</gpx>`;
+    }
+
+    function escapeXml(s) {
+      return String(s).replace(/[<>&'"]/g, c => ({
+        '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;'
+      }[c]));
+    }
+
+    function download(filename, text, mime='application/octet-stream') {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      return blob;
+    }
+
+    function exportGPX(id) {
+      const act = getActivities().find(a => a.id === id);
+      if (!act) return;
+      const gpx = buildGPX(act);
+      download((act.title || 'walk').replace(/\\s+/g,'_') + ".gpx", gpx, 'application/gpx+xml');
+    }
+
+    async function shareGPX(id) {
+      const act = getActivities().find(a => a.id === id);
+      if (!act) return;
+      const gpx = buildGPX(act);
+      const blob = new Blob([gpx], { type: 'application/gpx+xml' });
+      const file = new File([blob], (act.title || 'walk').replace(/\\s+/g,'_') + ".gpx", { type: 'application/gpx+xml' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: act.title || "Walk", text: "Mini Strava GPX" });
+        } catch (e) {
+          console.log('Share cancelled or failed', e);
+        }
+      } else {
+        download(file.name, gpx, 'application/gpx+xml');
+      }
+    }
+
+    function parseGPX(text) {
+      const dom = new DOMParser().parseFromString(text, "application/xml");
+      const trkpts = Array.from(dom.getElementsByTagNameNS("*","trkpt"));
+      const pts = trkpts.map(tp => ({
+        lat: parseFloat(tp.getAttribute("lat")),
+        lng: parseFloat(tp.getAttribute("lon")),
+        t: (tp.getElementsByTagNameNS("*","time")[0]?.textContent) || new Date().toISOString()
+      })).filter(p => isFinite(p.lat) && isFinite(p.lng));
+      return pts;
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initMap();
+      renderActivities();
+
+      $('startBtn').addEventListener('click', startTracking);
+      $('pauseBtn').addEventListener('click', pauseTracking);
+      $('resumeBtn').addEventListener('click', resumeTracking);
+      $('stopBtn').addEventListener('click', stopAndSave);
+
+      $('centerBtn').addEventListener('click', () => fitToTrack());
+
+      $('unitToggle').addEventListener('change', (e) => {
+        unitKm = !e.target.checked;
+        $('unitLabel').textContent = unitKm ? "km" : "mi";
+        updateStats();
+      });
+
+      $('exportAllBtn').addEventListener('click', () => {
+        const json = JSON.stringify(getActivities(), null, 2);
+        download("mini_strava_activities.json", json, 'application/json');
+      });
+
+      $('clearAllBtn').addEventListener('click', () => {
+        if (confirm("Delete all saved activities? This cannot be undone.")) {
+          setActivities([]);
+          renderActivities();
+        }
+      });
+
+      $('gpxImport').addEventListener('change', async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        let imported = 0;
+
+        try {
+          if (file.name.endsWith('.json')) {
+            const arr = JSON.parse(text);
+            if (Array.isArray(arr)) {
+              const all = getActivities();
+              arr.forEach(a => all.unshift(a));
+              setActivities(all);
+              imported = arr.length;
+            }
+          } else {
+            const pts = parseGPX(text);
+            if (pts.length > 1) {
+              const meters = computeDistance(pts);
+              const seconds = Math.max(0, (new Date(pts[pts.length-1].t) - new Date(pts[0].t)) / 1000 | 0);
+              const act = {
+                id: uuid(),
+                title: "Imported GPX",
+                createdAt: new Date().toISOString(),
+                unitKm: true,
+                points: pts,
+                meters, seconds
+              };
+              const all = getActivities();
+              all.unshift(act);
+              setActivities(all);
+              imported = 1;
+            }
+          }
+        } catch (err) {
+          alert("Import failed: " + err.message);
+        }
+
+        renderActivities();
+        $('status').textContent = imported ? `Imported ${imported} activit${imported===1?"y":"ies"}.` : "Nothing imported.";
+        e.target.value = "";
+      });
+    });
+
+    document.addEventListener('gesturestart', (e) => e.preventDefault());
+  </script>
+</body>
+</html>
